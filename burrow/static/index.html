@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Burrow</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23f2a65a'/%3E%3Cpath d='M12 10l11 6-11 6z' fill='%23161311'/%3E%3C/svg%3E">
+</head>
+<body>
+  <div id="login" class="login hidden">
+    <form id="loginForm">
+      <div class="brand big"><span class="logo"></span>Burrow</div>
+      <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+      <button>Enter</button>
+      <p id="loginErr" class="err"></p>
+    </form>
+  </div>
+
+  <div class="shell">
+    <nav class="side">
+      <div class="brand"><span class="logo"></span>Burrow</div>
+      <a href="#/" data-nav="home"><i class="ic ic-home"></i>Home</a>
+      <a href="#/movies" data-nav="movies"><i class="ic ic-film"></i>Movies</a>
+      <a href="#/tv" data-nav="tv"><i class="ic ic-tv"></i>TV Shows</a>
+      <a href="#/music" data-nav="music"><i class="ic ic-note"></i>Music</a>
+      <a href="#/genres" data-nav="genres"><i class="ic ic-grid"></i>Genres</a>
+      <div class="side-foot">
+        <button id="scanBtn" class="ghost">Rescan library</button>
+        <p class="private">Private &amp; local.<br>Nothing leaves this device.</p>
+      </div>
+    </nav>
+
+    <main>
+      <header class="top">
+        <input id="search" type="search" placeholder="Search your library…">
+      </header>
+      <section id="view"></section>
+    </main>
+  </div>
+
+  <div id="modal" class="modal hidden"><div class="sheet" id="sheet"></div></div>
+
+  <div id="player" class="player hidden">
+    <button class="close" id="closePlayer" aria-label="Close">✕</button>
+    <div class="ptitle" id="ptitle"></div>
+    <video id="video" controls playsinline></video>
+  </div>
+
+  <div id="audiobar" class="audiobar hidden">
+    <div class="ab-meta"><strong id="abTitle"></strong><span id="abArtist"></span></div>
+    <audio id="audio" controls></audio>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
