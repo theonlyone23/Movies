@@ -35,8 +35,21 @@ function posterHTML(it, label) {
   const inner = it.has_poster
     ? `<img loading="lazy" src="/poster/${it.id}" alt="">`
     : `<div class="fake" style="${art(label || it.title)}">${esc(label || it.title)}</div>`;
-  return `<div class="poster">${inner}${bar}</div>`;
+  const q = it.media || {};
+  const tag = q.resolution === "4K" ? (q.hdr ? "4K HDR" : "4K") : (q.hdr ? "HDR" : "");
+  return `<div class="poster">${inner}${tag ? `<span class="qtag">${tag}</span>` : ""}${bar}</div>`;
 }
+
+// "4K · HDR10 · HEVC · 5.1 · Dolby Digital+" badges from the file itself
+function badges(m) {
+  if (!m) return "";
+  const b = [m.resolution, m.hdr, m.video_codec,
+    m.audio_layout && m.audio_layout !== "Stereo" && m.audio_layout !== "Mono" ? m.audio_layout + " surround" : m.audio_layout,
+    m.audio_codec].filter(Boolean);
+  if (m.subtitles?.length) b.push("Subtitles: " + m.subtitles.slice(0, 4).join(", ").toUpperCase());
+  return b.length ? `<div class="badges">${b.map((x) => `<span class="badge${/4K|HDR|Vision|Atmos|7\.1|5\.1|TrueHD|DTS/.test(x) ? " hi" : ""}">${esc(x)}</span>`).join("")}</div>` : "";
+}
+const mins = (n) => n ? (n >= 60 ? `${Math.floor(n / 60)}h${n % 60 ? ` ${n % 60}m` : ""}` : `${n}m`) : "";
 
 function card(it) {
   let meta = it.year || "";
@@ -58,6 +71,7 @@ function emptyMsg(what) {
 }
 
 // ---------- Views ----------
+let homePoll = null;
 async function homeView() {
   const d = await api("/api/home");
   const c = d.counts;
@@ -68,6 +82,11 @@ async function homeView() {
       <div class="stat glass"><b>${c.episode || 0}</b><span>Episodes</span></div>
       <div class="stat glass"><b>${c.track || 0}</b><span>Songs</span></div>
     </div>`;
+  const notes = [];
+  if (d.info_pending) notes.push(`Looking up covers &amp; info for ${d.info_pending} title${d.info_pending === 1 ? "" : "s"}…`);
+  if (d.duplicates) notes.push(`<a href="#/duplicates">${d.duplicates} duplicate file${d.duplicates === 1 ? "" : "s"} hidden →</a>`);
+  if (notes.length) html += `<p class="note">${notes.join(" &nbsp;·&nbsp; ")}</p>`;
+  if (d.info_pending && !homePoll) homePoll = setTimeout(() => { homePoll = null; if ((location.hash || "#/") === "#/") route(); }, 4000);
   if (d.continue.length) html += `<h2>Continue watching</h2>${grid(d.continue, "row")}`;
   html += `<h2>Recently added</h2>` + (d.recent.length ? grid(d.recent, "row") : emptyMsg("movies or shows"));
   const genres = await api("/api/genres");
@@ -159,8 +178,13 @@ async function openItem(id) {
   let body = `<button class="close" data-close>✕</button>
     ${posterHTML(it)}
     <div><h1>${esc(it.title)}</h1>
-    <p class="sub">${[it.year, it.kind === "show" ? `${it.episodes.length} episodes` : null].filter(Boolean).join(" · ")}</p>
-    ${it.overview ? `<p>${esc(it.overview)}</p>` : ""}
+    <p class="sub">${[it.year,
+      it.info.rating ? `★ ${it.info.rating}` : null,
+      mins(it.info.runtime || (it.media.duration ? Math.round(it.media.duration / 60) : 0)) || null,
+      it.kind === "show" ? `${it.episodes.length} episodes` : null,
+      it.info.network, it.info.director ? `Directed by ${esc(it.info.director)}` : null].filter(Boolean).join(" · ")}</p>
+    ${it.kind === "movie" ? badges(it.media) : ""}
+    ${it.overview ? `<p class="overview">${esc(it.overview)}</p>` : ""}
     <div class="chips" id="gchips"></div>
     <div class="genre-edit"><input id="gin" placeholder="Add a genre (e.g. Horror)" list="glist">
       <button class="btn" id="gadd">Add</button></div><datalist id="glist"></datalist>`;
@@ -174,7 +198,15 @@ async function openItem(id) {
       `<button class="chip ${i ? "" : "on"}" data-season="${s}">Season ${s}</button>`).join("")}</div>
       <ul class="eps" id="eps"></ul>`;
   }
+  const src = it.info.source
+    ? `Info from <a href="${esc(it.info.link)}" target="_blank" rel="noopener noreferrer">${esc(it.info.source)}</a>`
+    : (it.meta_status === "notfound" ? "No match found online" : it.meta_status === "off" ? "Online info turned off for this title" : "");
+  body += `<p class="credit">${src}
+    <button class="link" id="refresh">Refresh info</button>
+    ${it.info.source ? `<button class="link" id="clearinfo">Wrong match? Remove</button>` : ""}</p>`;
   sheet.innerHTML = body + "</div>";
+  $("#refresh").onclick = async () => { await api(`/api/items/${id}/refresh`, {}); $("#refresh").textContent = "Looking up… check back in a moment"; };
+  if ($("#clearinfo")) $("#clearinfo").onclick = async () => { await api(`/api/items/${id}/clearinfo`, {}); openItem(id); route(); };
   $("#modal").classList.remove("hidden");
 
   // genres editor
@@ -201,7 +233,8 @@ async function openItem(id) {
       $("#eps").innerHTML = it.episodes.filter((e) => e.season == s).map((e) => {
         const done = e.progress && e.progress.duration && e.progress.position > e.progress.duration - 60;
         return `<li tabindex="0" data-ep="${e.id}"><span class="code">S${e.season} E${e.episode}</span>
-          <span>${esc(e.title)}</span><span class="m" style="margin-left:auto">${done ? "✓ watched" : ""}</span></li>`;
+          <span class="ep-main"><span>${esc(e.title)}</span>${e.overview ? `<span class="m ep-sum">${esc(e.overview)}</span>` : ""}</span>
+          <span class="m ep-side">${[done ? "✓ watched" : "", e.media.resolution, e.media.audio_layout === "5.1" || e.media.audio_layout === "7.1" ? e.media.audio_layout : ""].filter(Boolean).join(" · ")}</span></li>`;
       }).join("");
       $("#eps").querySelectorAll("[data-ep]").forEach((li) => li.onclick = () => {
         const ep = it.episodes.find((e) => e.id == li.dataset.ep);
@@ -295,6 +328,7 @@ async function route() {
     else if (section === "music") await musicView();
     else if (section === "genres" && h.split("/")[2]) await genreView(h.split("/").slice(2).join("/"));
     else if (section === "genres") await genresView();
+    else if (section === "duplicates") await duplicatesView();
     else await homeView();
   } catch (e) { if (e.message !== "login") console.error(e); }
 }
@@ -318,14 +352,31 @@ $("#search").oninput = () => {
 };
 
 $("#scanBtn").onclick = async () => {
-  const b = $("#scanBtn");
-  b.textContent = "Scanning…"; b.disabled = true;
+  const b = $("#scanBtn"), was = b.innerHTML;
+  b.innerHTML = "↻ <span>Scanning…</span>"; b.disabled = true;
   await api("/api/scan", {});
   const poll = setInterval(async () => {
     const d = await api("/api/home");
-    if (!d.scanning) { clearInterval(poll); b.textContent = "Rescan library"; b.disabled = false; route(); }
+    if (!d.scanning) { clearInterval(poll); b.innerHTML = was; b.disabled = false; route(); }
   }, 1000);
 };
+
+// ---------- Duplicates (hidden, never deleted) ----------
+async function duplicatesView() {
+  const list = await api("/api/duplicates");
+  const q = (m) => [m.resolution, m.hdr, m.audio_layout, m.audio_codec].filter(Boolean).join(" · ") || "unknown quality";
+  const gb = (n) => !n ? "" : n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : n >= 1e6 ? Math.round(n / 1e6) + " MB" : "<1 MB";
+  const name = (it) => it.kind === "episode" ? `${it.show_title || ""} · S${it.season}E${it.episode}` : it.kind === "track" ? `${it.title} — ${it.artist}` : it.title;
+  view.innerHTML = `<h1>Duplicates</h1>
+    <p class="sub">These files are copies of something already in your library, so they're hidden.
+    Burrow keeps the best copy (highest resolution, then HDR, then surround sound) and <b>never deletes anything</b>.
+    You can remove the extra files yourself to free up space.</p>` +
+    (list.length ? list.map((d) => `<div class="dup glass">
+      <div><b>${esc(name(d.kept))}</b></div>
+      <div class="dup-row keep"><span class="badge hi">Kept</span><span>${esc(q(d.kept.media))} · ${gb(d.kept.size)}</span><code>${esc(d.kept_path)}</code></div>
+      <div class="dup-row"><span class="badge">Hidden</span><span>${esc(q(d.hidden.media))} · ${gb(d.hidden.size)}</span><code>${esc(d.hidden_path)}</code></div>
+    </div>`).join("") : `<div class="empty">No duplicates. Nice and tidy.</div>`);
+}
 
 // ---------- Login (only if you set a password) ----------
 function showLogin() { $("#login").classList.remove("hidden"); $("#pw").focus(); }
@@ -337,7 +388,7 @@ $("#loginForm").onsubmit = async (e) => {
   else $("#loginErr").textContent = "Wrong password";
 };
 
-window.addEventListener("hashchange", () => route());
+window.addEventListener("hashchange", () => { $("#modal").classList.add("hidden"); route(); });
 api("/api/status").then((s) => { if (!s.auth) showLogin(); else route(); });
 
 // =====================================================================

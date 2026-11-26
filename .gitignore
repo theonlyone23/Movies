@@ -3,3 +3,4 @@ __pycache__/
 burrow/burrow.json
 tv/dist/webos/
 tv/dist/tizen/
+burrow/covers/

@@ -2,9 +2,24 @@
 
 A tiny, private media server for your own movies, TV shows and music.
 
-- **Private by design.** No accounts, no telemetry, no online metadata lookups. The library index is one SQLite file on your computer. The page blocks every outside request.
-- **Tiny.** Pure Python standard library: nothing to install, about 60 KB of code.
+- **Private by design.** No accounts and no tracking. Your files, your library and what you watch stay on your computer. The page itself never contacts any outside site.
+- **Covers and info from open databases** (details below).
+- **No duplicates.** If you have the same movie, episode or song more than once, Burrow shows it once and plays the best copy. Nothing is ever deleted; a **Duplicates** page lists the extra files so you can clean up.
+- **Knows your quality.** Every title shows its real specs, read from the file: **4K / 1080p / 720p**, **HDR10 / Dolby Vision**, **HEVC / H.264**, **5.1 / 7.1 surround**, **Dolby Digital+ / TrueHD / DTS-HD / Atmos**, and subtitle languages.
+- **Tiny.** Pure Python, about 100 KB of code. Install [FFmpeg](https://ffmpeg.org) (free) for the most accurate quality info; without it, Burrow reads it from file names.
 - **Simple.** Home, Movies, TV Shows, Music and Genres. Picks up where you left off and plays the next episode on its own.
+
+## Covers and info (open databases)
+
+| What | Where it comes from |
+|---|---|
+| Movies | [Wikidata](https://www.wikidata.org) (CC0) and [Wikipedia](https://en.wikipedia.org) (CC BY-SA): poster, description, genres, director, runtime |
+| TV shows | [TVmaze](https://www.tvmaze.com) (CC BY-SA): cover, summary, genres, rating, network, real episode names and summaries |
+| Music | [MusicBrainz](https://musicbrainz.org) (CC0) and the [Cover Art Archive](https://coverartarchive.org): album art, genres, year |
+
+All of these are free, community-run and need no account or key. **What is sent:** only the title and year (or artist and album) as a search, from your computer, once per title. No file paths and nothing about you or what you watch. Covers are saved locally in `burrow/covers/`.
+
+Your own files always win: a `poster.jpg` next to a movie, or a `.nfo` file, is used instead of anything online. If something matched wrong, open it and pick **Wrong match? Remove** or **Refresh info**. To turn lookups off completely, set `"online_info": false` in `burrow.json`.
 
 ## Quick start
 

@@ -4,7 +4,8 @@ Burrow - a tiny, private, self-hosted media server.
 
 * Pure Python standard library: nothing to install, nothing phones home.
 * Your library index lives in a single SQLite file next to this program.
-* No accounts, no telemetry, no online metadata lookups. Ever.
+* No accounts, no telemetry. Covers and descriptions come from open databases
+  (see metadata.py for exactly what is sent); turn that off with "online_info": false.
 
 Run:  python3 server.py            (uses burrow.json, creates one if missing)
 Then open http://127.0.0.1:8484 in your browser.
@@ -28,6 +29,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import metadata
+from mediainfo import describe, quality_score
+
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
 CONFIG_PATH = Path(os.environ.get("BURROW_CONFIG", APP_DIR / "burrow.json"))
@@ -44,6 +48,12 @@ DEFAULT_CONFIG = {
         "music": ["~/Music"],
     },
     "database": "burrow.db",
+    # Fetch covers, descriptions, genres and ratings from open databases
+    # (TVmaze, Wikidata/Wikipedia, MusicBrainz). Only titles are sent.
+    "online_info": True,
+    # Optional: an email or web page, added to requests so the databases can
+    # reach you if something goes wrong. Leave empty to send nothing.
+    "online_info_contact": "",
 }
 
 VIDEO_EXT = {".mp4", ".m4v", ".mkv", ".webm", ".mov", ".avi", ".ogv"}
@@ -123,6 +133,13 @@ class DB:
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        # Upgrade older databases in place
+        have = {r[1] for r in self.conn.execute("PRAGMA table_info(items)")}
+        for col, typ in [("mtime", "REAL"), ("media", "TEXT"), ("quality", "INTEGER"),
+                         ("dup_of", "INTEGER"), ("meta", "TEXT"), ("art", "TEXT"),
+                         ("ext_id", "TEXT"), ("meta_status", "TEXT")]:
+            if col not in have:
+                self.conn.execute(f"ALTER TABLE items ADD COLUMN {col} {typ}")
         self.conn.commit()
 
     def q(self, sql, args=()):
@@ -207,12 +224,32 @@ def norm_genre(g: str) -> str:
     return g[:1].upper() + g[1:] if g else g
 
 
+def norm_key(s) -> str:
+    return metadata.norm(str(s or ""))
+
+
 class Scanner:
-    def __init__(self, db: DB, cfg: dict):
+    def __init__(self, db: DB, cfg: dict, on_done=None):
         self.db, self.cfg = db, cfg
         self.running = False
         self.last = None
         self.stamp = 0
+        self.on_done = on_done
+        self.show_keys: dict[str, int] = {}
+
+    def media_for(self, f: Path) -> dict:
+        """Technical info for a file; only re-read when the file changed."""
+        st = f.stat()
+        row = self.db.q("SELECT media, size, mtime FROM items WHERE path=?", (str(f),))
+        if row and row[0]["media"] and row[0]["size"] == st.st_size \
+                and row[0]["mtime"] == st.st_mtime:
+            return json.loads(row[0]["media"])
+        return describe(str(f), f.name)
+
+    def file_fields(self, f: Path, info: dict) -> dict:
+        st = f.stat()
+        return {"size": st.st_size, "mtime": st.st_mtime,
+                "media": json.dumps(info), "quality": quality_score(info)}
 
     def roots(self, kind):
         for r in self.cfg["library"].get(kind, []):
@@ -245,6 +282,7 @@ class Scanner:
         self.running = True
         self.stamp = int(time.time())
         try:
+            self.show_keys = {}
             self.scan_movies()
             self.scan_tv()
             self.scan_music()
@@ -254,9 +292,12 @@ class Scanner:
                 self.db.x("DELETE FROM items WHERE id=?", (r["id"],))
                 self.db.x("DELETE FROM genres WHERE item_id=?", (r["id"],))
                 self.db.x("DELETE FROM progress WHERE item_id=?", (r["id"],))
+            dedupe(self.db)
             self.last = time.time()
         finally:
             self.running = False
+        if self.on_done:
+            self.on_done()
 
     def scan_movies(self):
         for root in self.roots("movies"):
@@ -277,7 +318,7 @@ class Scanner:
                     kind="movie", title=nfo.get("title", title),
                     year=int(nfo["year"]) if str(nfo.get("year", "")).isdigit() else year,
                     path=str(f), poster=find_image(f.parent, f.stem),
-                    overview=nfo.get("plot"), size=f.stat().st_size)
+                    overview=nfo.get("plot"), **self.file_fields(f, self.media_for(f)))
                 self.set_auto_genres(iid, nfo.get("genres", []) + folder_genres(f, root))
 
     def scan_tv(self):
@@ -299,10 +340,18 @@ class Scanner:
             return
         title, year = clean_title(sd.name)
         nfo = read_nfo(sd / "tvshow.nfo") if (sd / "tvshow.nfo").is_file() else {}
-        show_id = self.upsert(kind="show", title=nfo.get("title", title), year=year,
-                              path=str(sd), poster=find_image(sd),
-                              overview=nfo.get("plot"))
-        self.set_auto_genres(show_id, nfo.get("genres", []) + extra_genres)
+        title = nfo.get("title", title)
+        key = norm_key(title)
+        if key in self.show_keys:
+            # Same show in a second folder (e.g. "Show" and "Show (2019)"):
+            # merge its episodes into the first one instead of listing it twice.
+            show_id = self.show_keys[key]
+        else:
+            show_id = self.upsert(kind="show", title=title, year=year,
+                                  path=str(sd), poster=find_image(sd),
+                                  overview=nfo.get("plot"))
+            self.show_keys[key] = show_id
+            self.set_auto_genres(show_id, nfo.get("genres", []) + extra_genres)
         for i, f in enumerate(sorted(eps)):
             m = EP_RE.search(f.stem)
             if m:
@@ -315,8 +364,8 @@ class Scanner:
                 sm = re.search(r"season\s*(\d+)", str(f.parent), re.I)
                 s, e, ep_title = (int(sm.group(1)) if sm else 1), i + 1, clean_title(f.stem)[0]
             self.upsert(kind="episode", title=ep_title, path=str(f), parent_id=show_id,
-                        season=s, episode=e, size=f.stat().st_size,
-                        sort=f"{s:04d}{e:04d}")
+                        season=s, episode=e, sort=f"{s:04d}{e:04d}",
+                        **self.file_fields(f, self.media_for(f)))
 
     def scan_music(self):
         for root in self.roots("music"):
@@ -331,11 +380,154 @@ class Scanner:
                 m = TRACK_RE.match(f.stem)
                 no, name = (int(m.group(1)), m.group(2)) if m else (None, f.stem)
                 name = re.sub(r"[._]+", " ", name).strip()
+                info = self.media_for(f)
+                # Tags inside the file beat folder names
+                tags = info.get("tags", {})
+                artist = tags.get("album_artist") or tags.get("artist") or artist
+                album = tags.get("album") or album
+                name = tags.get("title") or name
+                tn = re.match(r"\d+", tags.get("track", ""))
+                no = int(tn.group()) if tn else no
+                if tags.get("genre"):
+                    genre += [g.strip() for g in re.split(r"[;/,]", tags["genre"]) if g.strip()]
                 iid = self.upsert(kind="track", title=name, path=str(f), artist=artist,
-                                  album=album, track_no=no, size=f.stat().st_size,
-                                  poster=find_image(f.parent),
-                                  sort=f"{artist.lower()}|{album.lower()}|{no or 0:04d}")
-                self.set_auto_genres(iid, [g.title() for g in genre])
+                                  album=album, track_no=no, poster=find_image(f.parent),
+                                  sort=f"{artist.lower()}|{album.lower()}|{no or 0:04d}",
+                                  **self.file_fields(f, info))
+                self.set_auto_genres(iid, [g.title() if g.islower() else g for g in genre])
+
+
+# --------------------------------------------------------------------------
+# Duplicates: the same movie / episode / song more than once. The best copy
+# (highest resolution, then HDR, then most audio channels, then biggest file)
+# stays in the library; the others are hidden. Files are never deleted.
+# --------------------------------------------------------------------------
+def dedupe(db: DB):
+    rows = db.q("""SELECT id, kind, title, year, parent_id, season, episode, artist,
+                          album, ext_id, quality, size FROM items
+                   WHERE kind IN ('movie','episode','track')""")
+    groups: dict[tuple, list] = {}
+    years_for_title: dict[str, set] = {}
+    for r in rows:
+        if r["kind"] == "movie" and not r["ext_id"] and r["year"]:
+            years_for_title.setdefault(norm_key(r["title"]), set()).add(r["year"])
+    for r in rows:
+        if r["kind"] == "movie":
+            if r["ext_id"]:
+                key = ("m", r["ext_id"])
+            else:
+                t = norm_key(r["title"])
+                y = r["year"]
+                if not y and len(years_for_title.get(t, ())) == 1:
+                    y = next(iter(years_for_title[t]))   # "Inception" == "Inception (2010)"
+                key = ("m", t, y)
+        elif r["kind"] == "episode":
+            key = ("e", r["parent_id"], r["season"], r["episode"])
+        else:
+            key = ("t", norm_key(r["artist"]), norm_key(r["album"]), norm_key(r["title"]))
+        groups.setdefault(key, []).append(r)
+    # ext_id groups and title groups can describe the same film: fold them together
+    by_title = {}
+    for key, members in list(groups.items()):
+        if key[0] == "m" and len(key) == 2:
+            for m in members:
+                by_title[(norm_key(m["title"]), m["year"])] = key
+    for key in list(groups):
+        if key[0] == "m" and len(key) == 3 and (key[1], key[2]) in by_title:
+            groups[by_title[(key[1], key[2])]] += groups.pop(key)
+
+    hide = {}
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        best = max(members, key=lambda m: (m["quality"] or 0, m["size"] or 0, -m["id"]))
+        for m in members:
+            if m is not best:
+                hide[m["id"]] = best["id"]
+    with db.lock:
+        db.conn.execute("UPDATE items SET dup_of=NULL")
+        db.conn.executemany("UPDATE items SET dup_of=? WHERE id=?",
+                            [(keep, iid) for iid, keep in hide.items()])
+        db.conn.commit()
+
+
+# --------------------------------------------------------------------------
+# Online info (covers, descriptions, genres, ratings) - runs in the background
+# --------------------------------------------------------------------------
+class MetaWorker:
+    def __init__(self, db: DB, cfg: dict, cache: Path):
+        self.db, self.cfg, self.cache = db, cfg, cache
+        self.lookup = metadata.Lookup(cfg.get("online_info_contact", ""))
+        self.busy = threading.Lock()
+        self.pending = 0
+        self.again = False
+
+    def enabled(self):
+        return bool(self.cfg.get("online_info", True))
+
+    def kick(self):
+        if not self.enabled():
+            return
+        if self.busy.locked():
+            self.again = True
+            return
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def todo(self):
+        return self.db.q("""SELECT id, kind, title, year FROM items
+                            WHERE kind IN ('movie','show') AND dup_of IS NULL
+                              AND meta_status IS NULL ORDER BY added DESC""")
+
+    def albums_todo(self):
+        return self.db.q("""SELECT artist, album, MIN(id) id FROM items
+                            WHERE kind='track' AND meta_status IS NULL
+                            GROUP BY artist, album""")
+
+    def count_pending(self):
+        if not self.enabled():
+            return 0
+        return len(self.todo()) + len(self.albums_todo())
+
+    def save(self, ids, meta, status):
+        art = None
+        if meta and meta.get("image"):
+            dest = self.cache / f"{meta['ext_id'].replace(':', '-')}.jpg"
+            if dest.exists() or self.lookup.download(meta["image"], dest):
+                art = str(dest)
+        for iid in ids:
+            self.db.x("UPDATE items SET meta=?, art=?, ext_id=?, meta_status=? WHERE id=?",
+                      (json.dumps(meta) if meta else None, art,
+                       meta.get("ext_id") if meta else None, status, iid))
+            self.db.x("DELETE FROM genres WHERE item_id=? AND manual=2", (iid,))
+            for g in (meta or {}).get("genres", []):
+                self.db.x("INSERT OR IGNORE INTO genres (item_id, genre, manual) VALUES (?,?,2)",
+                          (iid, g))
+
+    def run(self):
+        with self.busy:
+            while True:
+                self.again = False
+                for r in self.todo():
+                    try:
+                        meta = (self.lookup.movie if r["kind"] == "movie"
+                                else self.lookup.show)(r["title"], r["year"])
+                        self.save([r["id"]], meta, "ok" if meta else "notfound")
+                    except Exception as e:   # network down etc.: try again next scan
+                        print(f"  info lookup failed for {r['title']!r}: {e}")
+                        continue   # leave it for next time
+                for a in self.albums_todo():
+                    ids = [x["id"] for x in self.db.q(
+                        "SELECT id FROM items WHERE kind='track' AND artist IS ? AND album IS ?",
+                        (a["artist"], a["album"]))]
+                    try:
+                        meta = self.lookup.album(a["artist"], a["album"])
+                        self.save(ids, meta, "ok" if meta else "notfound")
+                    except Exception as e:
+                        print(f"  info lookup failed for {a['album']!r}: {e}")
+                        continue
+                dedupe(self.db)   # matching can reveal more duplicates
+                if not self.again:
+                    break
 
 
 # --------------------------------------------------------------------------
@@ -348,7 +540,8 @@ class App:
         if not db_path.is_absolute():
             db_path = APP_DIR / db_path
         self.db = DB(db_path)
-        self.scanner = Scanner(self.db, cfg)
+        self.meta = MetaWorker(self.db, cfg, db_path.parent / "covers")
+        self.scanner = Scanner(self.db, cfg, on_done=self.meta.kick)
         self.secret = secrets.token_bytes(32)  # session cookies die on restart
 
     def token(self):
@@ -357,9 +550,21 @@ class App:
 
 def item_out(app: App, r: dict) -> dict:
     r = dict(r)
-    r.pop("path", None)
-    r.pop("seen_scan", None)
-    r["has_poster"] = bool(r.pop("poster", None))
+    r["file"] = os.path.basename(r.pop("path", "") or "")
+    for k in ("seen_scan", "mtime", "quality", "ext_id"):
+        r.pop(k, None)
+    r["media"] = json.loads(r["media"]) if r.get("media") else {}
+    r["media"].pop("tags", None)
+    meta = json.loads(r.pop("meta") or "null") or {}
+    meta.pop("episodes", None)
+    r["info"] = meta
+    if meta:
+        r["overview"] = r.get("overview") or meta.get("overview")
+        r["year"] = r.get("year") or meta.get("year")
+        if r["kind"] in ("movie", "show") and meta.get("title"):
+            r["title"] = meta["title"]
+    r["has_poster"] = bool(r.pop("poster", None) or r.pop("art", None))
+    r.pop("art", None)
     r["genres"] = [g["genre"] for g in app.db.q(
         "SELECT genre FROM genres WHERE item_id=? ORDER BY genre", (r["id"],))]
     p = app.db.q("SELECT position, duration FROM progress WHERE item_id=?", (r["id"],))
@@ -465,12 +670,32 @@ class Handler(BaseHTTPRequestHandler):
                   float(data.get("duration", 0)), time.time()))
             return self.send_json({"ok": True})
 
+        m = re.fullmatch(r"/api/items/(\d+)/(refresh|clearinfo)", path)
+        if m:
+            iid, action = int(m.group(1)), m.group(2)
+            rows = db.q("SELECT kind, artist, album FROM items WHERE id=?", (iid,))
+            if not rows:
+                return self.send_json({"error": "not found"}, 404)
+            ids = [iid]
+            if rows[0]["kind"] == "track":   # info is per album
+                ids = [x["id"] for x in db.q(
+                    "SELECT id FROM items WHERE kind='track' AND artist IS ? AND album IS ?",
+                    (rows[0]["artist"], rows[0]["album"]))]
+            status = None if action == "refresh" else "off"
+            for i in ids:
+                db.x("""UPDATE items SET meta=NULL, art=NULL, ext_id=NULL, meta_status=?
+                        WHERE id=?""", (status, i))
+                db.x("DELETE FROM genres WHERE item_id=? AND manual=2", (i,))
+            dedupe(db)
+            self.app.meta.kick()
+            return self.send_json({"ok": True})
+
         m = re.fullmatch(r"/api/items/(\d+)/genres", path)
         if m:
             iid = int(m.group(1))
             genres = {norm_genre(str(g))[:40] for g in data.get("genres", []) if str(g).strip()}
             db.x("DELETE FROM genres WHERE item_id=?", (iid,))
-            for g in genres:
+            for g in genres:   # the user's list replaces scanned + looked-up genres
                 db.x("INSERT INTO genres (item_id, genre, manual) VALUES (?,?,1)", (iid, g))
             return self.send_json({"ok": True, "genres": sorted(genres)})
 
@@ -487,7 +712,7 @@ class Handler(BaseHTTPRequestHandler):
             search = one("q")
             sql = "SELECT i.* FROM items i"
             args = []
-            where = ["i.kind=?"]
+            where = ["i.kind=?", "i.dup_of IS NULL"]
             args.append(kind)
             if genre:
                 sql += " JOIN genres g ON g.item_id=i.id"
@@ -502,7 +727,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/genres":
             rows = db.q("""SELECT g.genre, i.kind, COUNT(*) n FROM genres g
                            JOIN items i ON i.id=g.item_id
-                           WHERE i.kind IN ('movie','show','track')
+                           WHERE i.kind IN ('movie','show','track') AND i.dup_of IS NULL
                            GROUP BY g.genre, i.kind ORDER BY g.genre""")
             out = {}
             for r in rows:
@@ -513,18 +738,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/home":
             cont = db.q("""SELECT i.* FROM progress p JOIN items i ON i.id=p.item_id
                            WHERE p.position > 30 AND p.position < p.duration - 60
+                             AND i.dup_of IS NULL
                            ORDER BY p.updated DESC LIMIT 12""")
             recent = db.q("""SELECT * FROM items WHERE kind IN ('movie','show')
-                             ORDER BY added DESC LIMIT 18""")
+                             AND dup_of IS NULL ORDER BY added DESC LIMIT 18""")
             counts = {r["kind"]: r["n"] for r in db.q(
-                "SELECT kind, COUNT(*) n FROM items GROUP BY kind")}
+                "SELECT kind, COUNT(*) n FROM items WHERE dup_of IS NULL GROUP BY kind")}
+            dups = db.q("SELECT COUNT(*) n FROM items WHERE dup_of IS NOT NULL")[0]["n"]
             out = lambda rows: [item_out(self.app, r) for r in rows]
             for c in (cont_out := out(cont)):
                 if c["kind"] == "episode":
                     show = db.q("SELECT title FROM items WHERE id=?", (c["parent_id"],))
                     c["show_title"] = show[0]["title"] if show else ""
             return self.send_json({"continue": cont_out, "recent": out(recent),
-                                   "counts": counts,
+                                   "counts": counts, "duplicates": dups,
+                                   "info_pending": self.app.meta.count_pending(),
                                    "scanning": self.app.scanner.running,
                                    "last_scan": self.app.scanner.last})
 
@@ -535,10 +763,34 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "not found"}, 404)
             item = item_out(self.app, rows[0])
             if item["kind"] == "show":
-                item["episodes"] = [item_out(self.app, e) for e in db.q(
-                    "SELECT * FROM items WHERE parent_id=? ORDER BY season, episode",
-                    (item["id"],))]
+                eps_meta = (json.loads(rows[0]["meta"] or "null") or {}).get("episodes", {})
+                item["episodes"] = []
+                for e in db.q("""SELECT * FROM items WHERE parent_id=? AND dup_of IS NULL
+                                 ORDER BY season, episode""", (item["id"],)):
+                    e = item_out(self.app, e)
+                    em = eps_meta.get(f"{e['season']}x{e['episode']}")
+                    if em:   # real episode names and summaries from TVmaze
+                        if em.get("title") and re.fullmatch(r"Episode \d+", e["title"]):
+                            e["title"] = em["title"]
+                        e["overview"] = e.get("overview") or em.get("overview")
+                        e["aired"] = em.get("aired")
+                    item["episodes"].append(e)
             return self.send_json(item)
+
+        if path == "/api/duplicates":
+            out = []
+            for d in db.q("SELECT * FROM items WHERE dup_of IS NOT NULL ORDER BY dup_of"):
+                keep = db.q("SELECT * FROM items WHERE id=?", (d["dup_of"],))
+                if keep:
+                    kept = item_out(self.app, keep[0])
+                    if kept["kind"] == "episode":
+                        show = db.q("SELECT title, meta FROM items WHERE id=?", (kept["parent_id"],))
+                        if show:
+                            kept["show_title"] = (json.loads(show[0]["meta"] or "null") or {}).get("title") \
+                                or show[0]["title"]
+                    out.append({"hidden": item_out(self.app, d), "kept": kept,
+                                "hidden_path": d["path"], "kept_path": keep[0]["path"]})
+            return self.send_json(out)
 
         return self.send_json({"error": "not found"}, 404)
 
@@ -547,11 +799,12 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/(media|poster)/(\d+)", path)
         if not m:
             return self.send_error(404)
-        rows = self.app.db.q("SELECT path, poster, kind FROM items WHERE id=?", (int(m.group(2)),))
+        rows = self.app.db.q("SELECT path, poster, art, kind FROM items WHERE id=?", (int(m.group(2)),))
         if not rows:
             return self.send_error(404)
         # Only paths recorded by the scanner can ever be served.
-        fpath = rows[0]["path"] if m.group(1) == "media" else rows[0]["poster"]
+        fpath = rows[0]["path"] if m.group(1) == "media" \
+            else (rows[0]["poster"] or rows[0]["art"])   # your own poster wins
         if not fpath or not os.path.isfile(fpath):
             return self.send_error(404)
         self.send_file(fpath, cache=m.group(1) == "poster")
@@ -614,10 +867,14 @@ def main():
     cfg = load_config()
     app = App(cfg)
     Handler.app = app
-    print("Scanning your library...")
-    app.scanner.scan()
-    counts = app.db.q("SELECT kind, COUNT(*) n FROM items GROUP BY kind")
-    print("  " + (", ".join(f"{c['n']} {c['kind']}s" for c in counts) or "nothing found yet"))
+    def first_scan():
+        app.scanner.scan()
+        counts = app.db.q("SELECT kind, COUNT(*) n FROM items WHERE dup_of IS NULL GROUP BY kind")
+        dups = app.db.q("SELECT COUNT(*) n FROM items WHERE dup_of IS NOT NULL")[0]["n"]
+        print("Library: " + (", ".join(f"{c['n']} {c['kind']}s" for c in counts) or "nothing found yet")
+              + (f" ({dups} duplicate files hidden)" if dups else ""))
+    print("Scanning your library in the background...")
+    threading.Thread(target=first_scan, daemon=True).start()
     host, port = cfg["host"], int(cfg["port"])
     if host not in ("127.0.0.1", "localhost") and not cfg.get("password"):
         print("WARNING: other devices can reach Burrow and no password is set.")
