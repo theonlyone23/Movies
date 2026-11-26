@@ -37,6 +37,10 @@ Genres come from (1) genre folder names, (2) `.nfo` files, or (3) adding them yo
 
 In `burrow.json` set `"host": "0.0.0.0"` and a `"password"`, then open `http://<this-computer's-IP>:8484` on the other device. Leave `host` as `127.0.0.1` to keep it to this computer only.
 
+## On your TV
+
+Burrow has a TV mode: big text, and you move around with the remote's arrow keys. It's used automatically on LG, Samsung and Fire TV, or add `?tv=1` to the address. You can sideload apps for **LG (webOS)**, **Samsung (Tizen)** and **Fire TV**; see [`tv/README.md`](tv/README.md). A Roku app is planned.
+
 ## Formats
 
 Burrow streams files as they are, with no re-encoding, which keeps it light. MP4 (H.264/AAC) plays everywhere. MKV plays in Chrome and Edge when it uses common codecs. MP3/M4A/FLAC/OGG audio all work.

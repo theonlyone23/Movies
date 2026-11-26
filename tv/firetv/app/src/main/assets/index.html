@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Burrow</title>
+<style>
+  :root { --accent: #f2a65a; --ink: #1a120b; --line: rgba(255,255,255,.16); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; color: #f6f0ea; font-family: system-ui, sans-serif;
+    background:
+      radial-gradient(60vw 50vh at 10% 0%, rgba(242,166,90,.32), transparent 70%),
+      radial-gradient(50vw 50vh at 95% 15%, rgba(140,70,200,.30), transparent 70%),
+      radial-gradient(60vw 60vh at 50% 110%, rgba(30,120,160,.26), transparent 70%), #120f0d; }
+  body { display: flex; align-items: center; justify-content: center; }
+  .box { width: 640px; padding: 48px; border-radius: 28px; background: rgba(255,255,255,.08);
+    border: 1px solid var(--line); text-align: center; }
+  .brand { display: flex; align-items: center; justify-content: center; gap: 16px; font-size: 54px; font-weight: 800; margin-bottom: 8px; }
+  .logo { width: 50px; height: 50px; border-radius: 50%; background: var(--accent); position: relative; }
+  .logo::after { content: ""; position: absolute; left: 20px; top: 14px; border-left: 16px solid var(--ink);
+    border-top: 11px solid transparent; border-bottom: 11px solid transparent; }
+  p { color: #b9aea4; font-size: 22px; line-height: 1.4; }
+  input, button { width: 100%; font: inherit; font-size: 26px; border-radius: 999px; padding: 16px 24px; margin-top: 14px; }
+  input { background: rgba(0,0,0,.3); color: #fff; border: 1px solid var(--line); text-align: center; }
+  button { background: rgba(255,255,255,.1); color: #fff; border: 1px solid var(--line); }
+  button.primary { background: var(--accent); color: var(--ink); font-weight: 800; border: 0; }
+  :focus { outline: 4px solid var(--accent); outline-offset: 4px; }
+  #msg { min-height: 1.5em; font-size: 20px; color: #ffb38a; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="brand"><span class="logo"></span>Burrow</div>
+  <div id="form">
+    <p>Enter the address of the computer running Burrow.<br>It's shown when you start the server.</p>
+    <input id="addr" placeholder="192.168.1.20:8484" autocomplete="off" spellcheck="false">
+    <button id="go" class="primary">Connect</button>
+    <p id="msg"></p>
+  </div>
+  <div id="auto" style="display:none">
+    <p>Connecting to <b id="autoAddr"></b>…</p>
+    <button id="change">Change server</button>
+  </div>
+</div>
+<script>
+(function () {
+  var KEY = "burrow.server";
+  var addr = document.getElementById("addr"), msg = document.getElementById("msg");
+  var cancelled = false;
+
+  function base(v) {
+    v = (v || "").trim().replace(/\/+$/, "");
+    if (!v) return "";
+    if (!/^https?:\/\//i.test(v)) v = "http://" + v;
+    if (!/:\d+$/.test(v.replace(/^https?:\/\//, ""))) v += ":8484";
+    return v;
+  }
+  function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+
+  function check(url, ok, fail) {
+    var done = false, x = new XMLHttpRequest();
+    var t = setTimeout(function () { if (!done) { done = true; x.abort(); fail("No answer from " + url); } }, 6000);
+    x.onload = function () {
+      if (done) return; done = true; clearTimeout(t);
+      try { if (JSON.parse(x.responseText).app === "burrow") return ok(); } catch (e) {}
+      fail("That address isn't a Burrow server.");
+    };
+    x.onerror = function () { if (!done) { done = true; clearTimeout(t); fail("Can't reach " + url + ". Is Burrow running with \"host\": \"0.0.0.0\"?"); } };
+    x.open("GET", url + "/api/status"); x.send();
+  }
+  function connect(url) {
+    msg.textContent = "Checking…";
+    check(url, function () {
+      store(KEY, url);
+      location.href = url + "/?tv=1";
+    }, function (e) { showForm(); msg.textContent = e; });
+  }
+  function showForm() {
+    cancelled = true;
+    document.getElementById("auto").style.display = "none";
+    document.getElementById("form").style.display = "";
+    addr.value = (store(KEY) || "").replace(/^http:\/\//, "");
+    addr.focus();
+  }
+
+  document.getElementById("go").onclick = function () { var u = base(addr.value); if (u) connect(u); };
+  document.getElementById("change").onclick = showForm;
+
+  // Remote: up/down between fields, Back exits the app.
+  document.addEventListener("keydown", function (e) {
+    var els = [].filter.call(document.querySelectorAll("input,button"), function (el) { return el.offsetParent; });
+    var i = els.indexOf(document.activeElement);
+    if (e.keyCode === 40) { e.preventDefault(); (els[i + 1] || els[0]).focus(); }
+    else if (e.keyCode === 38) { e.preventDefault(); (els[i - 1] || els[els.length - 1]).focus(); }
+    else if (e.keyCode === 13 && document.activeElement === addr) { document.getElementById("go").click(); }
+    else if (e.keyCode === 461 || e.keyCode === 10009 || e.key === "GoBack") {
+      try { if (window.tizen) tizen.application.getCurrentApplication().exit(); } catch (x) {}
+      try { if (window.webOS && webOS.platformBack) webOS.platformBack(); else window.close(); } catch (x) {}
+    }
+  });
+
+  // Saved server? Connect automatically unless the user asks to change it.
+  var saved = store(KEY);
+  if (saved) {
+    document.getElementById("form").style.display = "none";
+    document.getElementById("auto").style.display = "";
+    document.getElementById("autoAddr").textContent = saved.replace(/^https?:\/\//, "");
+    document.getElementById("change").focus();
+    setTimeout(function () { if (!cancelled) connect(saved); }, 1500);
+  } else { showForm(); }
+})();
+</script>
+</body>
+</html>

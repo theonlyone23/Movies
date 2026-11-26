@@ -1,0 +1,14 @@
+{
+  "id": "app.burrow.tv",
+  "version": "1.0.0",
+  "vendor": "Burrow",
+  "type": "web",
+  "main": "index.html",
+  "title": "Burrow",
+  "icon": "icon-80.png",
+  "largeIcon": "icon-130.png",
+  "bgColor": "#120f0d",
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true,
+  "requiredACG": []
+}

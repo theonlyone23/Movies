@@ -1,3 +1,5 @@
 __pycache__/
 *.db
 burrow/burrow.json
+tv/dist/webos/
+tv/dist/tizen/

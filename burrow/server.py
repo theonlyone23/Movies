@@ -376,9 +376,11 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     # ---------- helpers ----------
-    def send_json(self, data, status=200):
+    def send_json(self, data, status=200, cors=False):
         body = json.dumps(data).encode()
         self.send_response(status)
+        if cors:  # lets the TV apps check the server address before connecting
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -419,8 +421,9 @@ class Handler(BaseHTTPRequestHandler):
         path, qs = url.path, parse_qs(url.query)
         if path.startswith("/api/"):
             if path == "/api/status":
-                return self.send_json({"auth": self.authed(),
-                                       "needs_password": bool(self.app.cfg.get("password"))})
+                return self.send_json({"app": "burrow", "auth": self.authed(),
+                                       "needs_password": bool(self.app.cfg.get("password"))},
+                                      cors=True)
             if not self.authed():
                 return self.send_json({"error": "login required"}, 401)
             return self.api_get(path, qs)

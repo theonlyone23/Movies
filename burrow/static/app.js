@@ -18,7 +18,7 @@ async function api(path, body) {
 function hue(str) { let h = 0; for (const c of String(str)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
 function art(str) {
   const h = hue(str);
-  return `background:linear-gradient(150deg,hsl(${h} 55% 42%),hsl(${(h + 40) % 360} 60% 18%))`;
+  return `background:linear-gradient(150deg,hsla(${h},60%,50%,.55),hsla(${(h + 40) % 360},60%,22%,.35))`;
 }
 const GENRE_COLORS = {
   Horror: "#7a1420", Comedy: "#d18b10", Action: "#c2410c", Drama: "#5b3b8c",
@@ -27,7 +27,7 @@ const GENRE_COLORS = {
   Adventure: "#15803d", Mystery: "#3730a3", Western: "#92400e", Rock: "#9f1239",
   Jazz: "#1e40af", "Hip-Hop": "#a16207", Pop: "#db2777", Classical: "#4d7c0f",
 };
-const gcolor = (g) => GENRE_COLORS[g] || `hsl(${hue(g)} 45% 35%)`;
+const gcolor = (g) => (GENRE_COLORS[g] || `hsl(${hue(g)} 45% 35%)`);
 
 function posterHTML(it, label) {
   const bar = it.progress && it.progress.duration
@@ -43,7 +43,7 @@ function card(it) {
   let title = it.title;
   if (it.kind === "show") meta = (it.year ? it.year + " · " : "") + "Series";
   if (it.kind === "episode") { title = it.show_title || it.title; meta = `S${it.season} · E${it.episode}`; }
-  return `<div class="card" data-id="${it.id}" data-kind="${it.kind}">
+  return `<div class="card" tabindex="0" data-id="${it.id}" data-kind="${it.kind}">
     ${posterHTML(it, title)}
     <div class="t">${esc(title)}</div><div class="m">${esc(meta)}</div></div>`;
 }
@@ -63,10 +63,10 @@ async function homeView() {
   const c = d.counts;
   let html = `<h1>Welcome back</h1>
     <div class="stats">
-      <div class="stat"><b>${c.movie || 0}</b><span>Movies</span></div>
-      <div class="stat"><b>${c.show || 0}</b><span>TV Shows</span></div>
-      <div class="stat"><b>${c.episode || 0}</b><span>Episodes</span></div>
-      <div class="stat"><b>${c.track || 0}</b><span>Songs</span></div>
+      <div class="stat glass"><b>${c.movie || 0}</b><span>Movies</span></div>
+      <div class="stat glass"><b>${c.show || 0}</b><span>TV Shows</span></div>
+      <div class="stat glass"><b>${c.episode || 0}</b><span>Episodes</span></div>
+      <div class="stat glass"><b>${c.track || 0}</b><span>Songs</span></div>
     </div>`;
   if (d.continue.length) html += `<h2>Continue watching</h2>${grid(d.continue, "row")}`;
   html += `<h2>Recently added</h2>` + (d.recent.length ? grid(d.recent, "row") : emptyMsg("movies or shows"));
@@ -108,10 +108,10 @@ async function musicView() {
   let html = `<h1>Music</h1><p class="sub">${tracks.length} songs · ${albums.size} albums</p>`;
   for (const list of albums.values()) {
     const a = list[0];
-    html += `<div class="album"><div class="card square">${posterHTML(a, a.album)}</div><div>
-      <h2 style="margin-top:0">${esc(a.album)}</h2><p class="sub">${esc(a.artist)}${a.genres.length ? " · " + esc(a.genres.join(", ")) : ""}</p>
+    html += `<div class="album glass"><div class="card square">${posterHTML(a, a.album)}</div><div>
+      <h2>${esc(a.album)}</h2><p class="sub">${esc(a.artist)}${a.genres.length ? " · " + esc(a.genres.join(", ")) : ""}</p>
       <ol class="tracks">${list.map((t) =>
-        `<li data-track="${t.id}"><span class="n">${t.track_no || ""}</span>${esc(t.title)}</li>`).join("")}</ol></div></div>`;
+        `<li tabindex="0" data-track="${t.id}"><span class="n">${t.track_no || ""}</span>${esc(t.title)}</li>`).join("")}</ol></div></div>`;
   }
   view.innerHTML = html;
   view.querySelectorAll("[data-track]").forEach((li) => li.onclick = () =>
@@ -131,7 +131,7 @@ async function genresView() {
       const pl = (n, w) => n && `${n} ${w}${n === 1 ? "" : "s"}`;
       const bits = [pl(g.movie, "movie"), pl(g.show, "show"), pl(g.track, "song")].filter(Boolean);
       return `<a class="gtile" href="#/genres/${encodeURIComponent(g.genre)}"
-        style="background:linear-gradient(135deg,${gcolor(g.genre)},#0009)"><b>${esc(g.genre)}</b><span>${bits.join(" · ")}</span></a>`;
+        style="background:linear-gradient(135deg,${gcolor(g.genre)}b3,rgba(0,0,0,.15))"><b>${esc(g.genre)}</b><span>${bits.join(" · ")}</span></a>`;
     }).join("") + "</div>";
 }
 
@@ -144,7 +144,7 @@ async function genreView(genre) {
   if (movies.length) html += `<h2>Movies</h2>${grid(movies)}`;
   if (shows.length) html += `<h2>TV Shows</h2>${grid(shows)}`;
   if (tracks.length) html += `<h2>Music</h2><ol class="tracks">${tracks.map((t) =>
-    `<li data-track="${t.id}"><span class="n">♪</span>${esc(t.title)} <span class="m">— ${esc(t.artist)}</span></li>`).join("")}</ol>`;
+    `<li tabindex="0" data-track="${t.id}"><span class="n">♪</span>${esc(t.title)} <span class="m">— ${esc(t.artist)}</span></li>`).join("")}</ol>`;
   if (!movies.length && !shows.length && !tracks.length) html += `<div class="empty">Nothing here yet.</div>`;
   view.innerHTML = html;
   view.querySelectorAll("[data-track]").forEach((li) => li.onclick = () =>
@@ -167,7 +167,7 @@ async function openItem(id) {
   if (it.kind === "movie") {
     const resume = it.progress && it.progress.position > 30;
     body += `<p style="margin-top:22px"><button class="btn" id="play">${resume ? "▶ Resume" : "▶ Play"}</button>
-      ${resume ? `<button class="ghost" style="width:auto;margin-left:8px" id="restart">Start over</button>` : ""}</p>`;
+      ${resume ? `<button class="ghost" id="restart">Start over</button>` : ""}</p>`;
   } else {
     const seasons = [...new Set(it.episodes.map((e) => e.season))];
     body += `<h2>Episodes</h2><div class="season-tabs">${seasons.map((s, i) =>
@@ -181,7 +181,7 @@ async function openItem(id) {
   let genres = [...it.genres];
   const drawGenres = () => {
     $("#gchips").innerHTML = genres.map((g) =>
-      `<span class="chip">${esc(g)}<button class="x" data-rm="${esc(g)}" style="background:none;border:0;color:inherit;padding:0">✕</button></span>`).join("");
+      `<span class="chip">${esc(g)}<button class="x" data-rm="${esc(g)}" aria-label="Remove ${esc(g)}">✕</button></span>`).join("");
     $("#gchips").querySelectorAll("[data-rm]").forEach((x) => x.onclick = () => {
       genres = genres.filter((g) => g !== x.dataset.rm); save();
     });
@@ -191,6 +191,7 @@ async function openItem(id) {
   $("#gadd").onclick = () => { const v = $("#gin").value.trim(); if (v && !genres.includes(v)) { genres.push(v); save(); } $("#gin").value = ""; };
   $("#gin").onkeydown = (e) => { if (e.key === "Enter") $("#gadd").click(); };
   drawGenres();
+  setTimeout(() => (sheet.querySelector("#play") || sheet.querySelector("[data-ep]") || sheet.querySelector(".close"))?.focus(), 50);
 
   if (it.kind === "movie") {
     $("#play").onclick = () => playVideo(it);
@@ -199,7 +200,7 @@ async function openItem(id) {
     const drawEps = (s) => {
       $("#eps").innerHTML = it.episodes.filter((e) => e.season == s).map((e) => {
         const done = e.progress && e.progress.duration && e.progress.position > e.progress.duration - 60;
-        return `<li data-ep="${e.id}"><span class="code">S${e.season} E${e.episode}</span>
+        return `<li tabindex="0" data-ep="${e.id}"><span class="code">S${e.season} E${e.episode}</span>
           <span>${esc(e.title)}</span><span class="m" style="margin-left:auto">${done ? "✓ watched" : ""}</span></li>`;
       }).join("");
       $("#eps").querySelectorAll("[data-ep]").forEach((li) => li.onclick = () => {
@@ -214,7 +215,14 @@ async function openItem(id) {
     drawEps(it.episodes[0]?.season);
   }
 }
-const closeModal = () => $("#modal").classList.add("hidden");
+let lastFocus = null;
+const closeModal = () => {
+  $("#modal").classList.add("hidden");
+  // the page may have re-drawn while the details were open: find the same poster again
+  const el = lastFocus?.isConnected ? lastFocus
+    : lastFocus && document.querySelector(`#view .card[data-id="${lastFocus.dataset.id}"]`);
+  el?.focus({ preventScroll: true });
+};
 $("#modal").onclick = (e) => { if (e.target.id === "modal" || e.target.dataset.close !== undefined) closeModal(); };
 
 // ---------- Playback ----------
@@ -253,13 +261,13 @@ function closePlayer() {
   video.pause(); video.removeAttribute("src"); video.load();
   $("#player").classList.add("hidden");
   current = null;
-  route();
+  route().then(() => {
+    if (!$("#modal").classList.contains("hidden"))
+      ($("#sheet #play") || $("#sheet [data-ep]") || $("#sheet .close"))?.focus();
+  });
 }
 $("#closePlayer").onclick = closePlayer;
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  if (!$("#player").classList.contains("hidden")) closePlayer(); else closeModal();
-});
+
 
 const audio = $("#audio");
 let aQueue = [], aCur = null;
@@ -297,7 +305,7 @@ view.addEventListener("click", (e) => {
     const show = await api(`/api/items/${ep.parent_id}`);
     playVideo({ ...ep, show_title: show.title }, false, show.episodes);
   });
-  else openItem(c.dataset.id);
+  else { lastFocus = c; openItem(c.dataset.id); }
 });
 
 let searchTimer;
@@ -329,5 +337,119 @@ $("#loginForm").onsubmit = async (e) => {
   else $("#loginErr").textContent = "Wrong password";
 };
 
-window.addEventListener("hashchange", route);
+window.addEventListener("hashchange", () => route());
 api("/api/status").then((s) => { if (!s.auth) showLogin(); else route(); });
+
+// =====================================================================
+// TV & remote control support
+// Works with arrow keys on a keyboard, and the D-pad on LG (webOS),
+// Samsung (Tizen), and Fire TV remotes.
+// =====================================================================
+const TV = /Web0S|webOS|Tizen|SMART-TV|SmartTV|NetCast|AFT[A-Z]|BRAVIA|AndroidTV/i.test(navigator.userAgent)
+  || new URLSearchParams(location.search).has("tv");
+if (TV) document.documentElement.classList.add("tv");
+
+const BACK_KEYS = new Set(["Escape", "GoBack", "BrowserBack", "XF86Back"]);
+const BACK_CODES = new Set([461, 10009, 8]);       // webOS, Tizen, Backspace
+const FOCUSABLE = 'a[href], button:not([disabled]), input, [tabindex="0"]';
+const isOpen = (id) => !$(id).classList.contains("hidden");
+
+function focusScope() {
+  if (isOpen("#login")) return $("#login");
+  if (isOpen("#modal")) return $("#sheet");
+  return document;
+}
+function visibleEls(root) {
+  return [...root.querySelectorAll(FOCUSABLE)].filter((el) => {
+    if (el.closest(".hidden")) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
+}
+// Pick the nearest element in the pressed direction.
+function moveFocus(dir) {
+  const els = visibleEls(focusScope());
+  const cur = document.activeElement;
+  if (!els.includes(cur)) { (els.find((e) => e.closest("#view")) || els[0])?.focus(); return true; }
+  const a = cur.getBoundingClientRect();
+  const ax = a.left + a.width / 2, ay = a.top + a.height / 2;
+  let best = null, bestScore = Infinity;
+  for (const el of els) {
+    if (el === cur) continue;
+    const b = el.getBoundingClientRect();
+    const bx = b.left + b.width / 2, by = b.top + b.height / 2;
+    let main, side;
+    if (dir === "right") { if (b.left < a.right - 4) continue; main = b.left - a.right; side = Math.abs(by - ay); }
+    if (dir === "left")  { if (b.right > a.left + 4) continue; main = a.left - b.right; side = Math.abs(by - ay); }
+    if (dir === "down")  { if (b.top < a.bottom - 4) continue; main = b.top - a.bottom; side = Math.abs(bx - ax); }
+    if (dir === "up")    { if (b.bottom > a.top + 4) continue; main = a.top - b.bottom; side = Math.abs(bx - ax); }
+    const score = main + side * 2.5;
+    if (score < bestScore) { bestScore = score; best = el; }
+  }
+  if (!best) return false;
+  best.focus({ preventScroll: true });
+  best.scrollIntoView({ block: dir === "up" && best.closest(".topbar") ? "end" : "nearest", inline: "nearest" });
+  if (best.closest(".topbar")) window.scrollTo({ top: 0 });
+  return true;
+}
+
+// Back button: close player -> close details -> go back a page.
+// Returns true if it handled it (the Fire TV app uses this too).
+window.burrowBack = function () {
+  if (isOpen("#player")) { closePlayer(); return true; }
+  if (isOpen("#modal")) { closeModal(); return true; }
+  if (location.hash && location.hash !== "#/") { history.back(); return true; }
+  return false;
+};
+
+let osdTimer;
+function osd(text) {
+  const o = $("#osd"); o.textContent = text; o.classList.remove("hidden");
+  clearTimeout(osdTimer); osdTimer = setTimeout(() => o.classList.add("hidden"), 900);
+}
+const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+
+document.addEventListener("keydown", (e) => {
+  const k = e.key, code = e.keyCode;
+  const typing = document.activeElement?.tagName === "INPUT";
+  const isBack = BACK_KEYS.has(k) || (BACK_CODES.has(code) && !(typing && code === 8));
+
+  // --- inside the video player ---
+  if (isOpen("#player")) {
+    if (isBack) { e.preventDefault(); closePlayer(); return; }
+    if (k === "ArrowRight" || k === "MediaFastForward" || code === 417) {
+      e.preventDefault(); video.currentTime = Math.min(video.duration || 0, video.currentTime + 10); osd(`» ${fmt(video.currentTime)}`);
+    } else if (k === "ArrowLeft" || k === "MediaRewind" || code === 412) {
+      e.preventDefault(); video.currentTime = Math.max(0, video.currentTime - 10); osd(`« ${fmt(video.currentTime)}`);
+    } else if (k === "Enter" || k === " " || k === "MediaPlayPause" || code === 10252 || code === 415 || code === 19) {
+      e.preventDefault(); if (video.paused) { video.play(); osd("▶"); } else { video.pause(); osd("❚❚"); }
+    }
+    return;
+  }
+
+  if (isBack && !(typing && k === "Escape" && !isOpen("#modal"))) {
+    e.preventDefault(); window.burrowBack(); return;
+  }
+
+  const dir = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[k];
+  if (dir) {
+    if (typing && (dir === "left" || dir === "right")) return; // move the text cursor
+    if (moveFocus(dir)) e.preventDefault();
+    return;
+  }
+  // OK button on a card / track / episode
+  if (k === "Enter" && document.activeElement?.matches('[tabindex="0"]')) {
+    e.preventDefault(); document.activeElement.click();
+  }
+});
+
+// On TVs, put focus somewhere useful after each page loads.
+if (TV) {
+  const _route = route;
+  route = async function () {
+    await _route();
+    if (!isOpen("#modal") && !document.activeElement?.closest("#view, .topbar")) {
+      ($("#view .card, #view .gtile, #view [tabindex='0']") || $(".tabs a.on"))?.focus({ preventScroll: true });
+    }
+  };
+}
