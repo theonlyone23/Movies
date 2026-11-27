@@ -56,9 +56,9 @@ In `burrow.json` set `"host": "0.0.0.0"` and a `"password"`, then open `http://<
 
 Burrow has a TV mode: big text, and you move around with the remote's arrow keys. It's used automatically on LG, Samsung and Fire TV, or add `?tv=1` to the address. You can sideload apps for **LG (webOS)**, **Samsung (Tizen)** and **Fire TV**; see [`tv/README.md`](tv/README.md). A Roku app is planned.
 
-## Getting movies (Radarr setup for Windows)
+## Getting movies and shows (Radarr and Sonarr setup for Windows)
 
-Want new movies to arrive in 1080p with 5.1 surround, already organized with posters and info, on the drive you choose? See [`radarr/README.md`](radarr/README.md). One command, `movies setup`, configures Radarr for this.
+Want new movies and episodes to arrive in 1080p with 5.1 surround, already organized with posters and info, on the drive you choose? See [`media-setup/README.md`](media-setup/README.md). `movies setup` configures Radarr and `tv setup` configures Sonarr.
 
 ## Formats
 

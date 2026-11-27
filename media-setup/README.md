@@ -1,6 +1,8 @@
-# Movie setup for Radarr (Windows)
+# Movie and TV setup for Radarr and Sonarr (Windows)
 
-One command sets up [Radarr](https://radarr.video) so your movie collection:
+`movies setup` configures [Radarr](https://radarr.video) for movies and `tv setup` configures [Sonarr](https://sonarr.tv) for TV shows. Both work the same way. TV is covered [further down](#tv-shows-sonarr).
+
+One command sets up Radarr so your movie collection:
 
 - **Is 1080p at most.** No 4K and no huge remux files.
 - **Prefers 5.1 surround sound.** If a release with 5.1 exists, Radarr picks it. If not, it gets the normal 1080p copy, then swaps it for a 5.1 copy automatically when one shows up.
@@ -25,7 +27,7 @@ Burrow (in this repo) reads these folders, posters and `.nfo` files as they are.
 
 ## Install
 
-1. Download this folder: on GitHub click **Code > Download ZIP**, then unzip it. You only need the `radarr` folder (`movies.cmd` and `movies.ps1`). Put it anywhere, for example `C:\Tools\movies`.
+1. Download this folder: on GitHub click **Code > Download ZIP**, then unzip it. You only need the `media-setup` folder (`movies.cmd`, `movies.ps1`, `tv.cmd`, `tv.ps1`). Put it anywhere, for example `C:\Tools\movies`.
 2. Open **Command Prompt** in that folder (in File Explorer, type `cmd` in the address bar and press Enter).
 3. Run:
    ```
@@ -73,3 +75,31 @@ Notes:
 
 - A release labeled 7.1 or Atmos counts as a normal release (it doesn't get the 5.1 bonus), because you asked for 5.1 at most. A 7.1 track still plays on a 5.1 system.
 - Moving files to a different drive means copying them, so a big library takes a while. If you use torrents, Radarr copies (it doesn't move) so you can keep seeding. Your download client's own settings decide when the torrent and its files get removed.
+
+## TV shows (Sonarr)
+
+`tv` works just like `movies`, but for Sonarr (v4 or newer; free from https://sonarr.tv):
+
+```
+tv setup
+tv organize D:\Downloads
+tv search
+tv status
+```
+
+Same rules: 1080p at most, 5.1 surround preferred, a normal 1080p copy if there's no 5.1 (swapped for 5.1 later), artwork and `.nfo` files from TheTVDB (a public TV database), and the library on the drive you pick (it suggests `X:\TV`). Its settings are saved separately, in `%APPDATA%\MovieSetup\tv-settings.json`.
+
+```
+E:\TV\
+  Office Plants (2019)\
+    tvshow.nfo, poster.jpg, fanart.jpg
+    Season 01\
+      Office Plants (2019) - S01E01 - Pilot [WEBDL-1080p][EAC3 5.1]-GROUP.mkv
+      Office Plants (2019) - S01E01 - Pilot [WEBDL-1080p][EAC3 5.1]-GROUP.nfo
+```
+
+Differences from movies:
+
+- Quality upgrades stop at **WEB 1080p**, because most shows come out as WEB-DL and chasing Blu-ray copies would re-download whole seasons. Upgrades to 5.1 still happen.
+- `tv organize` takes a folder of show folders, season packs or single episodes. If it's a new show, it adds it to Sonarr first, then moves the episodes into `Show (Year)\Season 01\...`.
+- `tv setup` offers to switch shows Sonarr already has to the new settings and move them to the new drive.
