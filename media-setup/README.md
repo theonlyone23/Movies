@@ -1,6 +1,6 @@
 # Movie and TV setup for Radarr and Sonarr (Windows)
 
-`movies setup` configures [Radarr](https://radarr.video) for movies and `tv setup` configures [Sonarr](https://sonarr.tv) for TV shows. Both work the same way. TV is covered [further down](#tv-shows-sonarr).
+`movies setup` configures [Radarr](https://radarr.video) for movies and `tv setup` configures [Sonarr](https://sonarr.tv) for TV shows. Both work the same way. TV is covered [further down](#tv-shows-sonarr). To clean up and merge the drives you already have, see [`library`](#cleaning-up-your-drives-library).
 
 One command sets up Radarr so your movie collection:
 
@@ -27,7 +27,7 @@ Burrow (in this repo) reads these folders, posters and `.nfo` files as they are.
 
 ## Install
 
-1. Download this folder: on GitHub click **Code > Download ZIP**, then unzip it. You only need the `media-setup` folder (`movies.cmd`, `movies.ps1`, `tv.cmd`, `tv.ps1`). Put it anywhere, for example `C:\Tools\movies`.
+1. Download this folder: on GitHub click **Code > Download ZIP**, then unzip it. You only need the `media-setup` folder. Put it anywhere, for example `C:\Tools\movies`.
 2. Open **Command Prompt** in that folder (in File Explorer, type `cmd` in the address bar and press Enter).
 3. Run:
    ```
@@ -103,3 +103,44 @@ Differences from movies:
 - Quality upgrades stop at **WEB 1080p**, because most shows come out as WEB-DL and chasing Blu-ray copies would re-download whole seasons. Upgrades to 5.1 still happen.
 - `tv organize` takes a folder of show folders, season packs or single episodes. If it's a new show, it adds it to Sonarr first, then moves the episodes into `Show (Year)\Season 01\...`.
 - `tv setup` offers to switch shows Sonarr already has to the new settings and move them to the new drive.
+
+## Cleaning up your drives (`library`)
+
+`library` finds every movie and episode across all your drives, works out which copies are duplicates, keeps the best one, and can gather everything onto one drive.
+
+```
+library scan D: E: F:                  report only, changes nothing
+library dedupe D: E: F:                set the extra copies aside
+library consolidate D: E: F: -To G:    move the kept copies to G:\Movies and G:\TV
+library purge D: E: F:                 delete the set-aside copies for good
+library undo                           put back what the last dedupe or consolidate moved
+```
+
+Leave out the drive letters to pick them from a list. Type `D:`, not `"D:\"` (in CMD, quotes around a path that ends in `\` break it).
+
+**Recommended order**
+
+1. `library scan D: E: F:` writes `library-report.csv` (opens in Excel). Every file is listed as **KEEP** or **EXTRA**, with the reason. Check it.
+2. `library dedupe D: E: F:` moves each EXTRA into a `_Duplicates` folder **on the same drive**. It's instant and nothing is deleted.
+3. `library consolidate D: E: F: -To G:` moves the kept copies to `G:\Movies\Title (Year)\` and `G:\TV\Show\Season 01\`, along with their subtitles, `.nfo` files and posters. It checks for free space first. You can stop it with Ctrl+C and run it again; it continues where it left off.
+4. Watch a few things. If anything's wrong, `library undo` reverses the last step (run it again to reverse the one before).
+5. `library purge D: E: F:` deletes the `_Duplicates` folders, after you type `DELETE`.
+6. In Radarr: **Movies > Library Import** on `G:\Movies`. In Sonarr: **Series > Library Import** on `G:\TV`. They match everything to the online databases and can rename files and add posters. From then on, new downloads arrive in the same place.
+
+**Which copy is kept**
+
+- 1080p wins (4K is ranked just below it, since you wanted 1080p at most; use `-Prefer4K` to flip that), then 720p, then SD.
+- Then surround sound (5.1 or 7.1) beats stereo.
+- Then the bigger file (higher bitrate) wins.
+- Byte-for-byte identical copies are caught even when their names are different.
+
+Install FFmpeg (`winget install Gyan.FFmpeg`) so the resolution and audio channels are read from the files themselves. Without it, they're guessed from file names, and badly named files can be judged wrong.
+
+**What's never treated as a duplicate**
+
+- Parts: `CD1` and `CD2`, `Part 1` and `Part 2`.
+- Different cuts: Director's Cut, Extended, Theatrical, Unrated and so on.
+- A double episode file (`S01E01E02`) and a single `S01E01`.
+- Samples, trailers and extras folders are skipped completely. Files it can't recognize are left alone.
+
+Every move is logged in `%APPDATA%\MovieSetup\logs`.
