@@ -56,6 +56,10 @@ In `burrow.json` set `"host": "0.0.0.0"` and a `"password"`, then open `http://<
 
 Burrow has a TV mode: big text, and you move around with the remote's arrow keys. It's used automatically on LG, Samsung and Fire TV, or add `?tv=1` to the address. You can sideload apps for **LG (webOS)**, **Samsung (Tizen)** and **Fire TV**; see [`tv/README.md`](tv/README.md). A Roku app is planned.
 
+## Getting movies (Radarr setup for Windows)
+
+Want new movies to arrive in 1080p with 5.1 surround, already organized with posters and info, on the drive you choose? See [`radarr/README.md`](radarr/README.md). One command, `movies setup`, configures Radarr for this.
+
 ## Formats
 
 Burrow streams files as they are, with no re-encoding, which keeps it light. MP4 (H.264/AAC) plays everywhere. MKV plays in Chrome and Edge when it uses common codecs. MP3/M4A/FLAC/OGG audio all work.
